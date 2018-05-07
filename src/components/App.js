@@ -2,6 +2,11 @@ import React, { Component } from 'react';
 import logo from '../assets/logo.svg';
 import styled from 'styled-components';
 
+
+// loading SmartContract Details
+import { ABI, CONTRACT } from './data/contractData';
+
+
 class App extends Component {
   render() {
   	const Title = styled.h1`
