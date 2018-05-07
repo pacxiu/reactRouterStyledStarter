@@ -1,4 +1,4 @@
-var CONTRACT = "0x67123afd93dd99c2b7587ea506843bfd9485d95e";
+var CONTRACT = "0x345ca3e014aaf5dca488057592ee47305d9b3e10";
 var ABI = [
 	{
 		"constant": false,
