@@ -1,12 +1,21 @@
 import React, { Component } from 'react';
-import logo from '../assets/logo.svg';
+import { BrowserRouter as Router, Route, Switch, withRouter } from "react-router-dom";
 import styled from 'styled-components';
+
+import logo from '../assets/logo.svg';
 
 // loading SmartContract Details
 import { ABI, CONTRACT } from '../data/contractData';
 
 // libraries for SmartContract
 import Web3 from 'web3';
+
+// import components
+import Footer from './Footer/Footer';
+import Menu from './Menu/Menu';
+
+import Home from './Home/Home';
+import Marketplace from './Marketplace/Marketplace';
 
 class App extends Component {
 	constructor() {
@@ -106,6 +115,12 @@ class App extends Component {
 
     return (
 		<div className="App">
+			<Menu />
+
+			<Route exact path="/" render={(props) => ( <Home {...props} />)}/>
+
+			<Route exact path="/test" render={(props) => ( <Marketplace {...props} />)}/>
+
 			<header className="App-header">
 				<img src={logo} className="App-logo" alt="logo" />
 				<h1 className="App-title">Welcome to React</h1>
@@ -118,6 +133,8 @@ class App extends Component {
 			<Title>{account}</Title>
 
 			<Title>{network.current}</Title>
+
+			<Footer />
 		</div>
     );
   }

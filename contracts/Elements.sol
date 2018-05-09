@@ -1,108 +1,86 @@
 pragma solidity ^0.4.22;
 
 import './ERC721.sol';
-import './Ownable.sol';
+import './Pausable.sol';
+import './SafeMath.sol';
 
-contract Elements is ERC721, Ownable {
+contract Heroes is ERC721, Pausable {
+	using SafeMath for uint256;
 
   	/*** EVENTS ***/
-  	// @dev The Birth event is fired whenever a new element comes into existence.
+  	// @dev The Birth event is fired whenever a new hero comes into existence.
   	event Birth(uint256 tokenId, string name, address owner);
 
   	// @dev The TokenSold event is fired whenever a token is sold.
-  	event TokenSold(uint256 tokenId, uint256 oldPrice, uint256 newPrice, address prevOwner, address winner, string name);
+  	event TokenSold(uint256 tokenId, uint256 oldPrice, uint256 newPrice, address prevOwner, string name);
 
   	// @dev Transfer event as defined in current draft of ERC721. Ownership is assigned, including births.
   	event Transfer(address from, address to, uint256 tokenId);
 
-  	/*** CONSTANTS, VARIABLES ***/
-
-	// @notice Name and symbol of the non fungible token, as defined in ERC721.
-	string public constant NAME = "CryptoElements"; // solhint-disable-line
-	string public constant SYMBOL = "CREL"; // solhint-disable-line
-
-  	uint256 private periodicStartingPrice = 5 ether;
-  	uint256 private elementStartingPrice = 0.005 ether;
-  	uint256 private scientistStartingPrice = 0.1 ether;
-  	uint256 private specialStartingPrice = 0.05 ether;
-
-  	uint256 private firstStepLimit =  0.05 ether;
-  	uint256 private secondStepLimit = 0.75 ether;
-  	uint256 private thirdStepLimit = 3 ether;
-
-  	bool private periodicTableExists = false;
-
-  	uint256 private elementCTR = 0;
-  	uint256 private scientistCTR = 0;
-  	uint256 private specialCTR = 0;
-
-  	uint256 private constant elementSTART = 1;
-  	uint256 private constant scientistSTART = 1000;
-  	uint256 private constant specialSTART = 10000;
-
-  	uint256 private constant specialLIMIT = 5000;
-
   	/*** STORAGE ***/
 
-  	// @dev A mapping from element IDs to the address that owns them. All elements have
+  	// @dev A mapping from hero IDs to the address that owns them. All heroes have
   	//  some valid owner address.
-  	mapping (uint256 => address) public elementIndexToOwner;
+  	mapping (uint256 => address) public heroIndexToOwner;
 
   	// @dev A mapping from owner address to count of tokens that address owns.
   	//  Used internally inside balanceOf() to resolve ownership count.
   	mapping (address => uint256) private ownershipTokenCount;
 
-  	// @dev A mapping from ElementIDs to an address that has been approved to call
-  	//  transferFrom(). Each Element can only have one approved address for transfer
+  	// @dev A mapping from HeroIDs to an address that has been approved to call
+  	//  transferFrom(). Each Hero can only have one approved address for transfer
   	//  at any time. A zero value means no approval is outstanding.
-  	mapping (uint256 => address) public elementIndexToApproved;
+  	mapping (uint256 => address) public heroIndexToApproved;
 
-  	// @dev A mapping from ElementIDs to the price of the token.
-  	mapping (uint256 => uint256) private elementIndexToPrice;
+  	// @dev A mapping from HeroIDs to the price of the token.
+  	mapping (uint256 => uint256) private heroIndexToPrice;
 
-  	// The addresses of the accounts (or contracts) that can execute actions within each roles.
-  	address public ceoAddress;
-  	address public cooAddress;
+  	// @dev A mapping to check if Boss was attacked
+  	mapping (uint256 => mapping (uint256 => bool) ) private bossDefeated;
+
+  	/*** CONSTANTS, VARIABLES ***/
+	// @notice Name and symbol of the non fungible token, as defined in ERC721.
+	string public constant NAME = "EtherComics"; // solhint-disable-line
+	string public constant SYMBOL = "ECO"; // solhint-disable-line
+
+	uint256 private premiumPrice = 0.2 ether;
+  	uint256 private startingPrice = 0.05 ether;
+  	uint256 private levelPrice = 0.05 ether;
+  	uint256 private statPrice = 0.001 ether;
+
+  	uint256 private bossPool = 0;
+  	bool public hotPotatoPhase;
+
+  	uint256 hotPotatoCooldown = 2 hours;
+  	uint256 hotPotatoTimer;
 
   	/*** DATATYPES ***/
-  	struct Element {
+  	struct Hero {
   		uint256 tokenId;
     	string name;
-    	uint256 scientistId;
+    	uint256 level;
+    	uint256 heroAttack;
+    	uint256 heroDefense;
+    	uint256 bounty;
   	}
 
-  	mapping(uint256 => Element) elements;
+  	struct Boss {
+  		uint256 tokenId;
+    	string name;
+    	uint256 bossAttack;
+    	uint256 bossDefense;
+  	}
+
+  	mapping(uint256 => Hero) heroes;
+  	mapping(uint256 => Boss) bosses;
 
   	uint256[] tokens;
-
-  	/*** ACCESS MODIFIERS ***/
-  	// @dev Access modifier for CEO-only functionality
-  	modifier onlyCEO() {
-    	require(msg.sender == ceoAddress);
-    	_;
-  	}
-
-  	// @dev Access modifier for COO-only functionality
-  	modifier onlyCOO() {
-  	  require(msg.sender == cooAddress);
-  	  _;
-  	}
-
-  	// Access modifier for contract owner only functionality
-  	modifier onlyCLevel() {
-  	  	require(
-  	    	msg.sender == ceoAddress ||
-  	    	msg.sender == cooAddress
-  	  	);
-  	  	_;
-  	}
+  	uint256[] gameBosses;
 
   	/*** CONSTRUCTOR ***/
   	constructor() public {
-  	  	ceoAddress = msg.sender;
-  	  	cooAddress = msg.sender;
-
-  	  	createContractPeriodicTable("Periodic");
+  		pause();
+  		startHotPotato();
   	}
 
   	/*** PUBLIC FUNCTIONS ***/
@@ -115,7 +93,7 @@ contract Elements is ERC721, Ownable {
   	  	// Caller must own token.
   	  	require(_owns(msg.sender, _tokenId));
 	
-	  	elementIndexToApproved[_tokenId] = _to;
+	  	heroIndexToApproved[_tokenId] = _to;
 	
 	  	emit Approval(msg.sender, _to, _tokenId);
   	}
@@ -127,23 +105,6 @@ contract Elements is ERC721, Ownable {
     	return ownershipTokenCount[_owner];
   	}
 
-  	// @notice Returns all the relevant information about a specific element.
-  	// @param _tokenId The tokenId of the element of interest.
-  	function getElement(uint256 _tokenId) public view returns (
-  		uint256 tokenId,
-    	string elementName,
-    	uint256 sellingPrice,
-    	address owner,
-    	uint256 scientistId
-  	) {
-    	Element storage element = elements[_tokenId];
-    	tokenId = element.tokenId;
-    	elementName = element.name;
-    	sellingPrice = elementIndexToPrice[_tokenId];
-    	owner = elementIndexToOwner[_tokenId];
-    	scientistId = element.scientistId;
-  	}
-
   	function implementsERC721() public pure returns (bool) {
     	return true;
   	}
@@ -152,20 +113,16 @@ contract Elements is ERC721, Ownable {
   	// @param _tokenId The tokenID for owner inquiry
   	// @dev Required for ERC-721 compliance.
   	function ownerOf(uint256 _tokenId) public view returns (address owner) {
-    	owner = elementIndexToOwner[_tokenId];
+    	owner = heroIndexToOwner[_tokenId];
     	require(owner != address(0));
   	}
 
-  	function payout(address _to) public onlyCLevel {
-    	_payout(_to);
-  	}
-
   	// Allows someone to send ether and obtain the token
-  	function purchase(uint256 _tokenId) public payable {
-    	address oldOwner = elementIndexToOwner[_tokenId];
+  	function purchase(uint256 _tokenId) public payable hotPotato {
+    	address oldOwner = heroIndexToOwner[_tokenId];
     	address newOwner = msg.sender;
 
-    	uint256 sellingPrice = elementIndexToPrice[_tokenId];
+    	uint256 sellingPrice = heroIndexToPrice[_tokenId];
     	// Making sure token owner is not sending to self
     	require(oldOwner != newOwner);
     	require(sellingPrice > 0);
@@ -176,10 +133,11 @@ contract Elements is ERC721, Ownable {
     	// Making sure sent amount is greater than or equal to the sellingPrice
     	require(msg.value >= sellingPrice);
 
-    	uint256 ownerPayout = SafeMath.mul(SafeMath.div(sellingPrice, 100), 96);
+    	uint256 ownerPayout = SafeMath.mul(SafeMath.div(sellingPrice, 100), 91);
     	uint256 purchaseExcess = SafeMath.sub(msg.value, sellingPrice);
-    	uint256	feeOnce = SafeMath.div(SafeMath.sub(sellingPrice, ownerPayout), 4);
-    	uint256 fee_for_dev = SafeMath.mul(feeOnce, 2);
+
+    	// fee = 3% ( (100 - 91) / 3 )
+    	uint256	fee = SafeMath.div(SafeMath.sub(sellingPrice, ownerPayout), 3);
 
     	// Pay previous tokenOwner if owner is not contract
     	// and if previous price is not 0
@@ -187,71 +145,28 @@ contract Elements is ERC721, Ownable {
       		// old owner gets entire initial payment back
       		oldOwner.transfer(ownerPayout);
     	} else {
-      		fee_for_dev = SafeMath.add(fee_for_dev, ownerPayout);
+      		fee = SafeMath.add(fee, ownerPayout);
     	}
-
-    	// Taxes for Periodic Table owner
-	    if (elementIndexToOwner[0] != address(this)) {
-	    	elementIndexToOwner[0].transfer(feeOnce);
-	    } else {
-	    	fee_for_dev = SafeMath.add(fee_for_dev, feeOnce);
-	    }
-
-	    // Taxes for Scientist Owner for given Element
-	    uint256 scientistId = elements[_tokenId].scientistId;
-
-	    if ( scientistId != scientistSTART ) {
-	    	if (elementIndexToOwner[scientistId] != address(this)) {
-		    	elementIndexToOwner[scientistId].transfer(feeOnce);
-		    } else {
-		    	fee_for_dev = SafeMath.add(fee_for_dev, feeOnce);
-		    }
-	    } else {
-	    	fee_for_dev = SafeMath.add(fee_for_dev, feeOnce);
-	    }
 	        
     	if (purchaseExcess > 0) {
     		msg.sender.transfer(purchaseExcess);
     	}
 
-    	ceoAddress.transfer(fee_for_dev);
+    	// transfer fee, and add to bounties
+    	owner.transfer(fee);
+		bossPool = bossPool.add(fee);
+		heroes[_tokenId].bounty = heroes[_tokenId].bounty.add(fee);
 
     	_transfer(oldOwner, newOwner, _tokenId);
 
-    	//TokenSold(_tokenId, sellingPrice, elementIndexToPrice[_tokenId], oldOwner, newOwner, elements[_tokenId].name);
-    	// Update prices
-    	if (sellingPrice < firstStepLimit) {
-      		// first stage
-      		elementIndexToPrice[_tokenId] = SafeMath.div(SafeMath.mul(sellingPrice, 200), 100);
-    	} else if (sellingPrice < secondStepLimit) {
-      		// second stage
-      		elementIndexToPrice[_tokenId] = SafeMath.div(SafeMath.mul(sellingPrice, 150), 100);
-    	} else if (sellingPrice < thirdStepLimit) {
-    	  	// third stage
-      		elementIndexToPrice[_tokenId] = SafeMath.div(SafeMath.mul(sellingPrice, 130), 100);
-    	} else {
-      		// fourth stage
-      		elementIndexToPrice[_tokenId] = SafeMath.div(SafeMath.mul(sellingPrice, 115), 100);
-    	}
+    	//TokenSold(_tokenId, sellingPrice, heroIndexToPrice[_tokenId], oldOwner, newOwner, heroes[_tokenId].name);
+
+    	// Update price
+      	heroIndexToPrice[_tokenId] = SafeMath.div(SafeMath.mul(sellingPrice, 117), 100);
   	}
 
   	function priceOf(uint256 _tokenId) public view returns (uint256 price) {
-	    return elementIndexToPrice[_tokenId];
-  	}
-
-  	// @dev Assigns a new address to act as the CEO. Only available to the current CEO.
-  	// @param _newCEO The address of the new CEO
-  	function setCEO(address _newCEO) public onlyCEO {
-	    require(_newCEO != address(0));
-
-    	ceoAddress = _newCEO;
-  	}
-
-  	// @dev Assigns a new address to act as the COO. Only available to the current COO.
-  	// @param _newCOO The address of the new COO
-  	function setCOO(address _newCOO) public onlyCEO {
-    	require(_newCOO != address(0));
-    	cooAddress = _newCOO;
+	    return heroIndexToPrice[_tokenId];
   	}
 
   	// @notice Allow pre-approved user to take ownership of a token
@@ -259,7 +174,7 @@ contract Elements is ERC721, Ownable {
   	// @dev Required for ERC-721 compliance.
   	function takeOwnership(uint256 _tokenId) public {
     	address newOwner = msg.sender;
-    	address oldOwner = elementIndexToOwner[_tokenId];
+    	address oldOwner = heroIndexToOwner[_tokenId];
 
     	// Safety check to prevent against an unexpected 0x0 default.
     	require(_addressNotNull(newOwner));
@@ -270,9 +185,9 @@ contract Elements is ERC721, Ownable {
     	_transfer(oldOwner, newOwner, _tokenId);
   	}
 
-  	// @param _owner The owner whose element tokens we are interested in.
+  	// @param _owner The owner whose hero tokens we are interested in.
   	// @dev This method MUST NEVER be called by smart contract code. First, it's fairly
-  	//  expensive (it walks the entire Elements array looking for elements belonging to owner),
+  	//  expensive (it walks the entire Heroes array looking for heroes belonging to owner),
   	//  but it also returns a dynamic array, which is only supported for web3 calls, and
   	//  not contract-to-contract calls.
   	function tokensOfOwner(address _owner) public view returns(uint256[] ownerTokens) {
@@ -282,13 +197,13 @@ contract Elements is ERC721, Ownable {
       		return new uint256[](0);
     	} else {
       		uint256[] memory result = new uint256[](tokenCount);
-      		uint256 totalElements = totalSupply();
+      		uint256 totalHeroes = totalSupply();
       		uint256 resultIndex = 0;
-      		uint256 elementId;
-      		for (elementId = 0; elementId < totalElements; elementId++) {
-      			uint256 tokenId = tokens[elementId];
+      		uint256 heroId;
+      		for (heroId = 0; heroId < totalHeroes; heroId++) {
+      			uint256 tokenId = tokens[heroId];
 
-		        if (elementIndexToOwner[tokenId] == _owner) {
+		        if (heroIndexToOwner[tokenId] == _owner) {
 		          result[resultIndex] = tokenId;
 		          resultIndex++;
 		        }
@@ -333,206 +248,229 @@ contract Elements is ERC721, Ownable {
 
   	// For checking approval of transfer for address _to
 	function _approved(address _to, uint256 _tokenId) private view returns (bool) {
-		return elementIndexToApproved[_tokenId] == _to;
+		return heroIndexToApproved[_tokenId] == _to;
 	}
-
-  	// Private method for creating Element
-  	function _createElement(uint256 _id, string _name, address _owner, uint256 _price, uint256 _scientistId) private returns (string) {
-
-    	uint256 newElementId = _id;
-    	// It's probably never going to happen, 4 billion tokens are A LOT, but
-    	// let's just be 100% sure we never let this happen.
-    	require(newElementId == uint256(uint32(newElementId)));
-
-    	elements[_id] = Element(_id, _name, _scientistId);
-
-    	emit Birth(newElementId, _name, _owner);
-
-    	elementIndexToPrice[newElementId] = _price;
-
-    	// This will assign ownership, and also emit the Transfer event as
-    	// per ERC721 draft
-    	_transfer(address(0), _owner, newElementId);
-
-    	tokens.push(_id);
-
-    	return _name;
-  	}
-
-
-  	// @dev Creates Periodic Table as first element
-  	function createContractPeriodicTable(string _name) public onlyCEO {
-  		require(periodicTableExists == false);
-
-  		_createElement(0, _name, address(this), periodicStartingPrice, scientistSTART);
-  		periodicTableExists = true;
-  	}
-
-  	// @dev Creates a new Element with the given name and Id
-  	function createContractElement(string _name, uint256 _scientistId) public onlyCEO {
-  		require(periodicTableExists == true);
-
-    	uint256 _id = SafeMath.add(elementCTR, elementSTART);
-    	uint256 _scientistIdProcessed = SafeMath.add(_scientistId, scientistSTART);
-
-    	_createElement(_id, _name, address(this), elementStartingPrice, _scientistIdProcessed);
-    	elementCTR = SafeMath.add(elementCTR, 1);
-  	}
-
-  	// @dev Creates a new Scientist with the given name Id
-  	function createContractScientist(string _name) public onlyCEO {
-  		require(periodicTableExists == true);
-
-  		// to start from 1001
-  		scientistCTR = SafeMath.add(scientistCTR, 1);
-    	uint256 _id = SafeMath.add(scientistCTR, scientistSTART);
-    	
-    	_createElement(_id, _name, address(this), scientistStartingPrice, scientistSTART);	
-  	}
-
-  	// @dev Creates a new Special Card with the given name Id
-  	function createContractSpecial(string _name) public onlyCEO {
-  		require(periodicTableExists == true);
-  		require(specialCTR <= specialLIMIT);
-
-  		// to start from 10001
-  		specialCTR = SafeMath.add(specialCTR, 1);
-    	uint256 _id = SafeMath.add(specialCTR, specialSTART);
-
-    	_createElement(_id, _name, address(this), specialStartingPrice, scientistSTART);
-    	
-  	}
 
   	// Check for token ownership
   	function _owns(address claimant, uint256 _tokenId) private view returns (bool) {
-    	return claimant == elementIndexToOwner[_tokenId];
+    	return claimant == heroIndexToOwner[_tokenId];
   	}
 
-
-  	//**** HELPERS for checking elements, scientists and special cards
-  	function checkPeriodic() public view returns (bool) {
-  		return periodicTableExists;
-  	}
-
-  	function getTotalElements() public view returns (uint256) {
-  		return elementCTR;
-  	}
-
-  	function getTotalScientists() public view returns (uint256) {
-  		return scientistCTR;
-  	}
-
-  	function getTotalSpecials() public view returns (uint256) {
-  		return specialCTR;
-  	}
-
-  	//**** HELPERS for changing prices limits and steps if it would be bad, community would like different
-  	function changeStartingPricesLimits(uint256 _elementStartPrice, uint256 _scientistStartPrice, uint256 _specialStartPrice) public onlyCEO {
-  		elementStartingPrice = _elementStartPrice;
-  		scientistStartingPrice = _scientistStartPrice;
-  		specialStartingPrice = _specialStartPrice;
-	}
-
-	function changeStepPricesLimits(uint256 _first, uint256 _second, uint256 _third) public onlyCEO {
-		firstStepLimit = _first;
-		secondStepLimit = _second;
-		thirdStepLimit = _third;
-	}
-
-	// in case of error when assigning scientist to given element
-	function changeScientistForElement(uint256 _tokenId, uint256 _scientistId) public onlyCEO {
-    	Element storage element = elements[_tokenId];
-    	element.scientistId = SafeMath.add(_scientistId, scientistSTART);
-  	}
-
-  	function changeElementName(uint256 _tokenId, string _name) public onlyCEO {
-    	Element storage element = elements[_tokenId];
-    	element.name = _name;
-  	}
-
-  	// This function can be used by the owner of a token to modify the current price
-	function modifyTokenPrice(uint256 _tokenId, uint256 _newPrice) public payable {
-	    require(_newPrice > elementStartingPrice);
-	    require(elementIndexToOwner[_tokenId] == msg.sender);
-	    require(_newPrice < elementIndexToPrice[_tokenId]);
-
-	    if ( _tokenId == 0) {
-	    	require(_newPrice > periodicStartingPrice);
-	    } else if ( _tokenId < 1000) {
-	    	require(_newPrice > elementStartingPrice);
-	    } else if ( _tokenId < 10000 ) {
-	    	require(_newPrice > scientistStartingPrice);
-	    } else {
-	    	require(_newPrice > specialStartingPrice);
-	    }
-
-	    elementIndexToPrice[_tokenId] = _newPrice;
-	}
-
-  	// For paying out balance on contract
-  	function _payout(address _to) private {
-    	if (_to == address(0)) {
-      		ceoAddress.transfer(this.balance);
-    	} else {
-      		_to.transfer(this.balance);
-    	}
-  	}
-
-  	// @dev Assigns ownership of a specific Element to an address.
+  	// @dev Assigns ownership of a specific Hero to an address.
   	function _transfer(address _from, address _to, uint256 _tokenId) private {
-  	  	// Since the number of elements is capped to 2^32 we can't overflow this
+  	  	// Since the number of heroes is capped to 2^32 we can't overflow this
   	  	ownershipTokenCount[_to]++;
   	  	//transfer ownership
-  	  	elementIndexToOwner[_tokenId] = _to;
-  	  	// When creating new elements _from is 0x0, but we can't account that address.
+  	  	heroIndexToOwner[_tokenId] = _to;
+  	  	// When creating new heroes _from is 0x0, but we can't account that address.
   	  	if (_from != address(0)) {
   	    	ownershipTokenCount[_from]--;
   	    	// clear any previously approved ownership exchange
-  	    	delete elementIndexToApproved[_tokenId];
+  	    	delete heroIndexToApproved[_tokenId];
   	  	}
   	  	// Emit the transfer event.
   	  	emit Transfer(_from, _to, _tokenId);
   	}
-}
 
-library SafeMath {
 
-  	/**
-  	* @dev Multiplies two numbers, throws on overflow.
-  	*/
-	function mul(uint256 a, uint256 b) internal pure returns (uint256) {
-		if (a == 0) {
-		  return 0;
-		}
-		uint256 c = a * b;
-		assert(c / a == b);
-		return c;
+  	//*** CUSTOM FUNCTIONS ***
+
+  	// @notice Returns all the relevant information about a specific hero.
+  	// @param _tokenId The tokenId of the hero of interest.
+  	function getHero(uint256 _tokenId) public view returns (
+  		uint256 tokenId,
+    	string heroName,
+    	uint256 level,
+    	uint256 heroAttack,
+    	uint256 heroDefense,
+    	uint256 bounty,
+    	uint256 sellingPrice,
+    	address owner
+  	) {
+    	Hero storage hero = heroes[_tokenId];
+    	tokenId = hero.tokenId;
+    	heroName = hero.name;
+    	level = hero.level;
+    	heroAttack = hero.heroAttack;
+    	heroDefense = hero.heroDefense;
+    	bounty = hero.bounty;
+    	sellingPrice = heroIndexToPrice[_tokenId];
+    	owner = heroIndexToOwner[_tokenId];
+  	}
+
+  	function getBoss(uint256 _tokenId) public view returns (
+  		uint256 tokenId,
+    	string bossName,
+    	uint256 bossAttack,
+    	uint256 bossDefense
+  	) {
+    	Boss storage boss = bosses[_tokenId];
+    	tokenId = boss.tokenId;
+    	bossName = boss.name;
+    	bossAttack = boss.bossAttack;
+    	bossDefense = boss.bossDefense;
+  	}
+
+	// Private method for creating Hero
+  	function _createHero(string _name, address _owner, uint256 _price, uint256 _level, uint256 _heroAttack, uint256 _heroDefense) private returns (string) {
+    	uint256 newHeroId = tokens.length;
+    	// It's probably never going to happen, 4 billion tokens are A LOT, but
+    	// let's just be 100% sure we never let this happen.
+    	require(newHeroId == uint256(uint32(newHeroId)));
+
+    	heroes[newHeroId] = Hero(newHeroId, _name, _level, _heroAttack, _heroDefense, 0);
+
+    	emit Birth(newHeroId, _name, _owner);
+
+    	heroIndexToPrice[newHeroId] = _price;
+
+    	// This will assign ownership, and also emit the Transfer event as
+    	// per ERC721 draft
+    	_transfer(address(0), _owner, newHeroId);
+
+    	tokens.push(newHeroId);
+
+    	return _name;
+  	}
+
+  	// @dev Creates a new Hero
+  	function createHero(string _name) public onlyOwner whenNotPaused {
+    	_createHero(_name, address(this), startingPrice, 1, 0, 0);
+  	}
+
+  	// @dev Creates a new Premium Hero
+  	function createPremiumHero(string _name, uint256 _level, uint256 _heroAttack, uint256 _heroDefense) public onlyOwner whenNotPaused {
+    	_createHero(_name, address(this), premiumPrice, _level, _heroAttack, _heroDefense);
+  	}
+
+  	// Private method for creating Boss
+  	function _createBoss(string _name, uint256 _bossAttack, uint256 _bossDefense) private returns (string) {
+    	uint256 newBossId = gameBosses.length;
+    	// It's probably never going to happen, 4 billion tokens are A LOT, but
+    	// let's just be 100% sure we never let this happen.
+    	require(newBossId == uint256(uint32(newBossId)));
+
+    	bosses[newBossId] = Boss(newBossId, _name, _bossAttack, _bossDefense);
+
+    	gameBosses.push(newBossId);
+
+    	return _name;
+  	}
+
+  	// @dev Creates a new Boss
+  	function createBoss(string _name, uint256 _bossAttack, uint256 _bossDefense) public onlyOwner whenNotPaused {
+    	_createBoss(_name, _bossAttack, _bossDefense);
+  	}
+
+  	// This function can be used by the owner of a token to modify the current price
+	function modifyTokenPrice(uint256 _tokenId, uint256 _newPrice) external payable onlyHeroOwner(_tokenId) whenNotPaused {
+	    require(_newPrice > startingPrice);
+	    require(_newPrice < heroIndexToPrice[_tokenId]);
+
+	    heroIndexToPrice[_tokenId] = _newPrice;
 	}
 
-  	/**
-  	* @dev Integer division of two numbers, truncating the quotient.
-  	*/
-  	function div(uint256 a, uint256 b) internal pure returns (uint256) {
-    	// assert(b > 0); // Solidity automatically throws when dividing by 0
-    	uint256 c = a / b;
-    	// assert(a == b * c + a % b); // There is no case in which this doesn't hold
-    	return c;
+	// leveling up characters
+	function levelUp(uint256 _tokenId) external payable onlyHeroOwner(_tokenId) whenNotPaused {
+		require(msg.value == levelPrice);
+		Hero storage hero = heroes[_tokenId];
+
+		hero.level = hero.level.add(1);
+
+		// bounties, fees
+		uint256 fee = SafeMath.div(SafeMath.mul(msg.value, 100), 20);
+		uint256 bossBounty = SafeMath.div(SafeMath.mul(msg.value, 100), 30);
+		uint256 heroBounty = SafeMath.div(SafeMath.mul(msg.value, 100), 50);
+
+		owner.transfer(fee);
+		bossPool = bossPool.add(bossBounty);
+		hero.bounty = hero.bounty.add(heroBounty);
+	}
+
+	// upgradeStats for hero
+	function upgradeStats(uint256 _tokenId, uint256 statPoints, bool attackStat) external payable onlyHeroOwner(_tokenId) whenNotPaused {
+		uint256 totalPrice = statPoints.mul(statPrice);
+		require(msg.value == totalPrice);
+
+		Hero storage hero = heroes[_tokenId];
+
+		if (attackStat) {
+			hero.heroAttack = hero.heroAttack.add(statPoints);
+		} else {
+			hero.heroDefense = hero.heroDefense.add(statPoints);
+		}
+
+		// bounties, fees
+		uint256 fee = SafeMath.div(SafeMath.mul(msg.value, 100), 20);
+		uint256 bossBounty = SafeMath.div(SafeMath.mul(msg.value, 100), 30);
+		uint256 heroBounty = SafeMath.div(SafeMath.mul(msg.value, 100), 50);
+
+		owner.transfer(fee);
+		bossPool = bossPool.add(bossBounty);
+		hero.bounty = hero.bounty.add(heroBounty);
+	}
+
+	function attackBoss(uint256 _heroId, uint256 _bossId) external onlyHeroOwner(_heroId) whenNotPaused notHotPotato {
+		// can only defeat once
+		require(!bossDefeated[_heroId][_bossId]);
+		require( heroes[_heroId].heroAttack > bosses[_bossId].bossDefense );
+
+		// transfer 3% from bossPool
+		uint256 reward = SafeMath.div(SafeMath.mul(bossPool, 100), 3);
+		heroIndexToOwner[_heroId].transfer(reward);
+
+		bossPool = bossPool.sub(reward);
+		bossDefeated[_heroId][_bossId] = true;
+	}
+
+	function attackPlayer(uint256 _heroId, uint256 _targetHeroId) external onlyHeroOwner(_heroId) whenNotPaused notHotPotato {
+		// can't attack your own heroes
+		require( heroIndexToOwner[_heroId] != heroIndexToOwner[_targetHeroId]);
+
+		Hero storage heroAttacker = heroes[_heroId];
+        Hero storage heroDefender = heroes[_targetHeroId];
+
+		require( heroAttacker.heroAttack > heroDefender.heroDefense );
+
+		// transfer 25% from bounty
+		uint256 reward = SafeMath.div(SafeMath.mul(heroDefender.bounty, 100), 25);
+		heroIndexToOwner[_heroId].transfer(reward);
+		heroDefender.bounty = heroDefender.bounty.sub(reward);
+	}
+
+	//*** CUSTOM EVENTS ***
+	event StartHotPotato();
+  	event StopHotPotato();
+
+
+  	//*** CUSTOM MODIFIERS ***
+  	// @dev actions specified only for hero owner
+  	modifier onlyHeroOwner(uint256 _tokenId) {
+  		require(heroIndexToOwner[_tokenId] == msg.sender);
+    	_;
   	}
 
-  	/**
-  	* @dev Substracts two numbers, throws on overflow (i.e. if subtrahend is greater than minuend).
-  	*/
-  	function sub(uint256 a, uint256 b) internal pure returns (uint256) {
-    	assert(b <= a);
-    	return a - b;
+  	modifier hotPotato() {
+  		require(hotPotatoPhase);
+  		_;
   	}
 
-  	/**
-  	* @dev Adds two numbers, throws on overflow.
-  	*/
-  	function add(uint256 a, uint256 b) internal pure returns (uint256) {
-    	uint256 c = a + b;
-    	assert(c >= a);
-    	return c;
+  	modifier notHotPotato() {
+  		require(!hotPotatoPhase);
+  		_;
   	}
+
+  	function startHotPotato() onlyOwner public {
+	    hotPotatoPhase = true;
+	    hotPotatoTimer = now;
+
+	    emit StartHotPotato();
+	}
+
+	function stopHotPotato() public {
+		require(now >= hotPotatoTimer + hotPotatoCooldown);
+
+	    hotPotatoPhase = false;
+	    emit StopHotPotato();
+	}
 }
