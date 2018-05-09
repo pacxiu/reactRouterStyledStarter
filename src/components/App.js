@@ -1,6 +1,6 @@
 import React, { Component } from 'react';
 import { BrowserRouter as Router, Route, Switch, withRouter } from "react-router-dom";
-import styled from 'styled-components';
+import styled, { injectGlobal } from 'styled-components';
 
 import logo from '../assets/logo.svg';
 
@@ -16,6 +16,9 @@ import Menu from './Menu/Menu';
 
 import Home from './Home/Home';
 import Marketplace from './Marketplace/Marketplace';
+
+import { Container } from './style-utils/Grid';
+import { sizeVars } from './style-utils/vars';
 
 class App extends Component {
 	constructor() {
@@ -104,6 +107,15 @@ class App extends Component {
 	}
 
   render() {
+  	injectGlobal`
+	  body {
+	    margin: 0;
+	    background: green;
+	    padding-top: ${sizeVars.navHeight};
+	  }
+	`;
+
+
   	const Title = styled.h1`
 	  font-size: 1.5em;
 	  text-align: center;
@@ -121,14 +133,8 @@ class App extends Component {
 
 			<Route exact path="/test" render={(props) => ( <Marketplace {...props} />)}/>
 
-			<header className="App-header">
-				<img src={logo} className="App-logo" alt="logo" />
-				<h1 className="App-title">Welcome to React</h1>
-			</header>
-				<p className="App-intro">
-				To get started, edit <code>src/App.js</code> and save to reload.
-				</p>
-			<Title>Title</Title>
+
+			<Container><Title>Title</Title></Container>
 
 			<Title>{account}</Title>
 
